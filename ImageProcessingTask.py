@@ -3,7 +3,70 @@ import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
 import cv2
+from scipy.signal import find_peaks
 
+# Image Color #
+def convert_to_grayscale(image):
+    if len(image.shape) == 3:  
+            image_gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    else:
+            image_gray = image  
+    return image_gray
+
+# Threshold # 
+def calculate_threshold(image):
+    if len(image.shape) == 3: 
+        image_gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    else:  
+        image_gray = image
+    
+    avg_pixel_value = np.mean(image_gray)
+    st.write(f"Average Pixel Value: {avg_pixel_value:.2f}")
+
+    _, thresholded_image = cv2.threshold(image_gray, avg_pixel_value, 255, cv2.THRESH_BINARY)
+    
+    return thresholded_image, avg_pixel_value
+
+# Halftone # 
+def simple_halftone(image):
+    if len(image.shape) == 3:
+        image_gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    else:  
+        image_gray = image
+
+    # _, thresholded_image = cv2.threshold(image_gray, 127, 255, cv2.THRESH_BINARY)
+    thresholded_image = np.where(image_gray > 127, 255, 0).astype(np.uint8)
+    return thresholded_image
+
+def error_diffusion(image, threshold=128):
+    """Simplified error diffusion with Floyd-Steinberg pattern"""
+    if len(image.shape) == 3:
+        image = np.mean(image, axis=2).astype(np.uint8) #grayscale
+    
+    output = np.zeros_like(image, dtype=np.uint8)
+    error = np.zeros_like(image, dtype=float)
+    padded = np.pad(image.astype(float), ((0,1), (0,1)), 'constant')
+    
+    for i in range(image.shape[0]):
+        for j in range(image.shape[1]):
+            old_pixel = padded[i,j] + error[i,j]
+            new_pixel = 255 if old_pixel > threshold else 0
+            output[i,j] = new_pixel
+            quant_error = old_pixel - new_pixel
+            
+            # Distribute error using Floyd-Steinberg pattern
+            if j + 1 < image.shape[1]:
+                error[i, j+1] += quant_error * 7/16
+            if i + 1 < image.shape[0]:
+                if j > 0:
+                    error[i+1, j-1] += quant_error * 3/16
+                error[i+1, j] += quant_error * 5/16
+                if j + 1 < image.shape[1]:
+                    error[i+1, j+1] += quant_error * 1/16
+    
+    return output
+
+#Histogram #
 def create_histogram(image):
     """Calculate histogram from scratch with additional statistics"""
     if len(image.shape) == 3:
@@ -80,34 +143,6 @@ def histogram_equalization(image):
     }
     
     return equalized.astype(np.uint8), metrics
-
-def error_diffusion(image, threshold=128):
-    """Simplified error diffusion with Floyd-Steinberg pattern"""
-    if len(image.shape) == 3:
-        image = np.mean(image, axis=2).astype(np.uint8)
-    
-    output = np.zeros_like(image, dtype=np.uint8)
-    error = np.zeros_like(image, dtype=float)
-    padded = np.pad(image.astype(float), ((0,1), (0,1)), 'constant')
-    
-    for i in range(image.shape[0]):
-        for j in range(image.shape[1]):
-            old_pixel = padded[i,j] + error[i,j]
-            new_pixel = 255 if old_pixel > threshold else 0
-            output[i,j] = new_pixel
-            quant_error = old_pixel - new_pixel
-            
-            # Distribute error using Floyd-Steinberg pattern
-            if j + 1 < image.shape[1]:
-                error[i, j+1] += quant_error * 7/16
-            if i + 1 < image.shape[0]:
-                if j > 0:
-                    error[i+1, j-1] += quant_error * 3/16
-                error[i+1, j] += quant_error * 5/16
-                if j + 1 < image.shape[1]:
-                    error[i+1, j+1] += quant_error * 1/16
-    
-    return output
 
 def sobel_edge_detection(image):
     """Implement Sobel edge detection"""
@@ -384,9 +419,9 @@ def difference_operator(image, threshold):
 #difference of gaussians DOG
 def difference_of_gaussians(image):
     if len(image.shape) == 3:  # If the image is RGB (3 channels)
-        image = np.mean(image, axis=2)  # Convert RGB to grayscale by averaging channels
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)  # Convert RGB to grayscale by averaging channels
     
-    mask1=np.array([
+    mask1 = np.array([
         [ 0,  0, -1, -1, -1,  0,  0],
         [ 0, -2, -3, -3, -3, -2,  0],
         [-1, -3,  5,  5,  5, -3, -1],
@@ -395,7 +430,8 @@ def difference_of_gaussians(image):
         [ 0, -2, -3, -3, -3, -2,  0],
         [ 0,  0, -1, -1, -1,  0,  0]
     ], dtype=np.float32)
-    mask2=np.array([
+
+    mask2 = np.array([
         [ 0,  0,  0, -1, -1, -1,  0,  0,  0],
         [ 0, -2, -3, -3, -3, -3, -3, -2,  0],
         [ 0, -3, -2, -1, -1, -1, -2, -3,  0],
@@ -406,6 +442,8 @@ def difference_of_gaussians(image):
         [ 0, -2, -3, -3, -3, -3, -3, -2,  0],
         [ 0,  0,  0, -1, -1, -1,  0,  0,  0]
     ], dtype=np.float32)
+
+    
     blurred1=cv2.filter2D(image,-1,mask1)
     blurred2=cv2.filter2D(image,-1,mask2)
     
@@ -540,6 +578,95 @@ def cut_paste(image1,image2,position,size):
     output_image[y:y+h,x:x+w]=cut_image
     
     return output_image
+
+# histogram_based_segmentation
+def manual_Technique(image,low_threshold,high_threshold,value=255):
+    segmented_image=np.zeros_like(image)
+    segmented_image[(image >= low_threshold) & (image <= high_threshold)] = value
+    return segmented_image
+
+#histogram peak technique 
+def histogram_peak_threshold_segmentation(image):
+    hist=cv2.calcHist([image],[0],None,[256],[ 0,255]).flatten()
+    peaks_indices=find_hitogram_peaks(hist)
+    low_threshold,high_threshold=Calculate_thresholds(peaks_indices,hist)
+    print([low_threshold,high_threshold])
+    segmented_image=np.zeros_like(image)
+    segmented_image[(image >= low_threshold) & (image <= high_threshold)] = 255
+
+    return segmented_image
+
+def find_hitogram_peaks(hist):
+    peaks, _ = find_peaks(hist,height=0)
+    sorted_peaks=sorted(peaks,key=lambda x: hist[x] , reverse=True)
+    return sorted_peaks[:2]
+
+def Calculate_thresholds(peaks_indices,hist):
+    if len(peaks_indices) < 2:
+        raise ValueError("Insufficient peaks detected in the histogram.")
+    
+    peak1=peaks_indices[0]
+    peak2=peaks_indices[1]
+    low_threshold=(peak1 + peak2)//2
+    high_threshold=peak2
+    
+    return low_threshold,high_threshold
+
+#histogram_valley_technique
+def histogram_valley_threshold_segmentation(image):
+    hist=cv2.calcHist([image],[0],None,[256],[ 0,255]).flatten()
+    peaks_indices=find_hitogram_peaks(hist)
+    valley_point=find_valley_point(peaks_indices,hist)
+    low_threshold,high_threshold=valley_low_high(peaks_indices,valley_point)
+    print([low_threshold,high_threshold])
+    segmented_image=np.zeros_like(image)
+    segmented_image[(image >= low_threshold) & (image <= high_threshold)] = 255
+    return segmented_image  
+
+def find_valley_point(peaks_indices,hist):
+    valley_point=0
+    min_valley=float('inf')
+    start,end=peaks_indices
+    for i in range(start,end+1):
+        if hist[i] < min_valley:
+            min_valley=hist[i]
+            valley_point=i
+    return valley_point
+
+def valley_low_high(peaks_indices,valley_point):
+    low_threshold=valley_point
+    high_threshold=peaks_indices[1]
+    return low_threshold,high_threshold
+
+#adaptive_histogram
+
+def adaptive_histogram_threshold_segmentation(image):
+    hist=cv2.calcHist([image],[0],None,[256],[ 0,255]).flatten()
+    peaks_indices=find_hitogram_peaks(hist)
+    valley_point=find_valley_point(peaks_indices,hist)
+    low_threshold,high_threshold=valley_low_high(peaks_indices,valley_point)
+    print([low_threshold,high_threshold])
+    segmented_image=np.zeros_like(image)
+    segmented_image[(image >= low_threshold) & (image <= high_threshold)] = 255
+    background_mean,object_mean=Calculate_mean(segmented_image,image)
+    new_peak_indices=[int(background_mean),int(object_mean)]
+    new_low_threshold,new_high_threshold=valley_low_high(new_peak_indices,find_valley_point(new_peak_indices,hist))
+    print([new_low_threshold,new_high_threshold])
+    final_segmented_image=np.zeros_like(image)
+    final_segmented_image[(image >= low_threshold) & (image <= high_threshold)] = 255
+    return final_segmented_image
+
+def Calculate_mean(segmented_image,orignal_image):
+    object_pixels=orignal_image[segmented_image == 255]
+    background_pixels=orignal_image[segmented_image == 0]
+    
+    object_mean=object_pixels.mean() if object_pixels.size > 0 else 0
+    background_mean=background_pixels.mean() if background_pixels.size > 0 else 0 
+    
+    return object_mean,background_mean
+
+
+
 def main():
     st.title("Enhanced Image Processing Application")
     st.write("Upload an image to apply various processing techniques")
@@ -549,16 +676,19 @@ def main():
     if uploaded_file is not None:
         image = np.array(Image.open(uploaded_file))
         
-        if len(image.shape) == 3:  # Check if the image has 3 channels (color image)
+        if len(image.shape) == 3:  
             image_gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
         else:
-            image_gray = image  # Already grayscale
+            image_gray = image  
+            st.write("This image is already in grayscale.")
+        # OR __>
+        # image_gray = convert_to_grayscale(image)
         
         processing_option = st.sidebar.selectbox(
             "Select Processing Technique",
-            ["Histogram Equalization", "Error Diffusion Halftoning", 
+            ["Convert to Grayscale","Apply Threshold","Simple Halftone","Error Diffusion Halftoning","Display Histogram","Histogram Equalization", 
             "Sobel Edge Detection", "Prewitt Edge Detection", 
-            "Kirsch Edge Detection","Homogeneity Operator", "Difference Operator","Difference of Gaussians (DoG)","Contrast Based Edge Detection", "Variance Operator", "Range Operator", "Convolution", "Median Filter","Add Images", "Subtract Images", "Invert Image", "Cut and Paste"]
+            "Kirsch Edge Detection","Homogeneity Operator", "Difference Operator","Difference of Gaussians (DoG)","Contrast Based Edge Detection", "Variance Operator", "Range Operator", "Convolution", "Median Filter","Add Images", "Subtract Images", "Invert Image", "Cut and Paste","Manual Threshold Segmentation","Histogram Peak Threshold Segmentation","Valley Threshold Segmentation","Adaptive Histogram Threshold Segmentation"]
         )
         
         if processing_option == "Histogram Equalization":
@@ -586,6 +716,39 @@ def main():
                     st.write(f"Mean (R,G,B): {proc_stats['mean']}")
                 else:
                     st.write(f"Mean: {proc_stats['mean']:.2f}")
+                    
+        elif processing_option == "Display Histogram":
+            st.write("Displaying the histogram of the image...")
+            
+            # Create histogram and stats
+            hist, stats = create_histogram(image)
+            
+            # Display histogram plot
+            plt.figure(figsize=(10, 5))
+            if len(image.shape) == 3:  # If the image is RGB
+                # Plot separate histograms for each channel (Red, Green, Blue)
+                plt.plot(hist[0], color='red', label='Red Channel')
+                plt.plot(hist[1], color='green', label='Green Channel')
+                plt.plot(hist[2], color='blue', label='Blue Channel')
+                plt.title('RGB Histogram')
+                
+                # Display stats for color image (RGB)
+                st.write(f"Mean values: Red={stats['mean'][0]:.2f}, Green={stats['mean'][1]:.2f}, Blue={stats['mean'][2]:.2f}")
+                st.write(f"Max values: Red={stats['max'][0]}, Green={stats['max'][1]}, Blue={stats['max'][2]}")
+                st.write(f"Min values: Red={stats['min'][0]}, Green={stats['min'][1]}, Blue={stats['min'][2]}")
+            else:  # If the image is grayscale
+                plt.plot(hist, color='gray', label='Grayscale Histogram')
+                plt.title('Grayscale Histogram')
+                
+                # Display stats for grayscale image
+                st.write(f"Mean value: {stats['mean']:.2f}")
+                st.write(f"Max value: {stats['max']}")
+                st.write(f"Min value: {stats['min']}")
+            
+            plt.xlabel('Pixel Intensity')
+            plt.ylabel('Frequency')
+            plt.legend()
+            st.pyplot(plt)
             
         elif processing_option == "Error Diffusion Halftoning":
             threshold = st.sidebar.slider("Threshold", 0, 255, 128)
@@ -795,7 +958,85 @@ def main():
                 ax.hist(processed.ravel(), bins=256, histtype='step', color='black')
                 ax.set_xlim(0, 255)
                 st.pyplot(fig)
-        
+        elif processing_option == "Manual Threshold Segmentation":
+            # User inputs for low and high threshold values
+            low_threshold = st.sidebar.slider("Low Threshold", 0, 255, 50)
+            high_threshold = st.sidebar.slider("High Threshold", 0, 255, 200)
+            
+            # Apply the manual segmentation technique
+            processed = manual_Technique(image_gray, low_threshold, high_threshold)
+            
+            # Display the processed image
+            st.image(processed, caption="Manually Segmented Image", use_column_width=True)
+            
+            # Display histogram for the processed image
+            fig, ax = plt.subplots()
+            ax.hist(processed.ravel(), bins=256, histtype='step', color='black')
+            ax.set_xlim(0, 255)
+            st.pyplot(fig)
+        elif processing_option == "Histogram Peak Threshold Segmentation":
+            # Apply Histogram Peak Threshold Segmentation
+            processed = histogram_peak_threshold_segmentation(image_gray)
+            
+            # Display the processed image
+            st.image(processed, caption="Segmented Image using Histogram Peak Thresholding", use_column_width=True)
+            
+            # Display histogram for the processed image
+            fig, ax = plt.subplots()
+            ax.hist(processed.ravel(), bins=256, histtype='step', color='black')
+            ax.set_xlim(0, 255)
+            st.pyplot(fig)
+        elif processing_option == "Valley Threshold Segmentation":
+            # Apply the valley threshold segmentation technique
+            processed = histogram_valley_threshold_segmentation(image_gray)
+            
+            # Display the processed image
+            st.image(processed, caption="Segmented Image using Valley Thresholding", use_column_width=True)
+            
+            # Display histogram for the processed image
+            fig, ax = plt.subplots()
+            ax.hist(processed.ravel(), bins=256, histtype='step', color='black')
+            ax.set_xlim(0, 255)
+            st.pyplot(fig)
+        elif processing_option == "Adaptive Histogram Threshold Segmentation":
+            # Apply Adaptive Histogram Threshold Segmentation
+            processed = adaptive_histogram_threshold_segmentation(image_gray)
+            
+            # Display the processed image
+            st.image(processed, caption="Adaptive Threshold Segmented Image", use_column_width=True)
+            
+            # Display histogram for the processed image
+            fig, ax = plt.subplots()
+            ax.hist(processed.ravel(), bins=256, histtype='step', color='black')
+            ax.set_xlim(0, 255)
+            st.pyplot(fig)
+        elif processing_option == "Convert to Grayscale":
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.image(image, caption="Original Image", use_column_width=True)
+            
+            with col2:
+                st.image(image_gray, caption="Grayscale Image", use_column_width=True)
+        elif processing_option == "Apply Threshold":
+            # Calculate threshold based on average pixel value
+            thresholded_image, avg_pixel_value = calculate_threshold(image)
+            
+            # Show both original and thresholded image
+            st.image(image, caption='Original Image', use_column_width=True)
+            st.image(thresholded_image, caption="Thresholded Image", use_column_width=True)
+            
+            st.write(f"Threshold applied using the average pixel value of {avg_pixel_value:.2f}.")
+            
+            if avg_pixel_value > 127:
+                st.write("The threshold might not be optimal because the average pixel value is higher than the midpoint of the 0-255 range.")
+            else:
+                st.write("The threshold might not be optimal because the average pixel value is lower than the midpoint of the 0-255 range.")
+        elif processing_option == "Simple Halftone":
+            halftone_image = simple_halftone(image)
+            st.image(image, caption='Original Image', use_column_width=True)
+            st.image(halftone_image, caption="Simple Halftone Image", use_column_width=True)
+
 
 
 if __name__ == "__main__":
