@@ -5,12 +5,20 @@ from PIL import Image
 import cv2
 from scipy.signal import find_peaks
 
-# Image Color #
+#Image Color #
 def convert_to_grayscale(image):
     if len(image.shape) == 3:  
             image_gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
     else:
             image_gray = image  
+    return image_gray
+
+# image color using numpy 
+def convert_to_grayscale(image):
+    if len(image.shape) == 3:
+        image_gray = np.mean(image, axis=2).astype(np.uint8)
+    else:
+        image_gray= image
     return image_gray
 
 # Threshold # 
@@ -23,7 +31,8 @@ def calculate_threshold(image):
     avg_pixel_value = np.mean(image_gray)
     st.write(f"Average Pixel Value: {avg_pixel_value:.2f}")
 
-    _, thresholded_image = cv2.threshold(image_gray, avg_pixel_value, 255, cv2.THRESH_BINARY)
+    # _, thresholded_image = cv2.threshold(image_gray, avg_pixel_value, 255, cv2.THRESH_BINARY)
+    thresholded_image= np.where(image_gray >= avg_pixel_value, 255, 0).astype(np.uint8)
     
     return thresholded_image, avg_pixel_value
 
@@ -217,7 +226,7 @@ def plot_comparison(original, processed, title):
 
 def plot_edge_detection(original, results):
     """Plot edge detection results"""
-    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 12))
+    fig, (ax1, ax3, ax4) = plt.subplots(1, 3, figsize=(18, 6))      
     
     ax1.imshow(original, cmap='gray')
     ax1.set_title('Original')
@@ -233,6 +242,7 @@ def plot_edge_detection(original, results):
     
     plt.tight_layout()
     return fig
+
 
 def prewitt_edge_detection(image):
     """Prewitt edge detection with all directions"""
@@ -314,6 +324,7 @@ def kirsch_edge_detection(image):
 
 def plot_prewitt_results(original, results):
     """Plot Prewitt edge detection results"""
+    # تعديل التخطيط إلى 3 صفوف وعمودين مع 5 صور فقط
     fig, ((ax1, ax2), (ax3, ax4), (ax5, ax6)) = plt.subplots(3, 2, figsize=(12, 15))
     
     ax1.imshow(original, cmap='gray')
@@ -336,6 +347,10 @@ def plot_prewitt_results(original, results):
     ax5.set_title('Diagonal 135°')
     ax5.axis('off')
     
+    plt.subplots_adjust(hspace=0.5, wspace=0.3)
+    
+    ax6.remove()
+
     plt.tight_layout()
     return fig
 
@@ -461,12 +476,13 @@ def contrast_based_edge_detection(image):
     edge_mask = np.array([[-1, 0, -1],
                           [0, -4, 0],
                           [-1, 0, -1]])
+    smoothing_mask = np.ones((3,3)) / 9
     
     # Apply edge detection (Laplacian filter)
     edge_output = cv2.filter2D(image, -1, edge_mask)
     
     # Apply Gaussian smoothing instead of the average filter
-    average_output = cv2.GaussianBlur(image, (5, 5), 0)  # You can adjust the kernel size
+    average_output = cv2.filter2D(image,-1, smoothing_mask)  
     average_output = average_output.astype(float)
     
     # Avoid division by zero by adding a small constant
@@ -474,11 +490,6 @@ def contrast_based_edge_detection(image):
     
     # Compute contrast edge detection
     contrast_edge = edge_output / average_output
-    
-    # Threshold to remove low-contrast areas
-    contrast_edge[contrast_edge < 0.1] = 0  # Adjust threshold as needed
-    
-    # Ensure there are no NaN values
     contrast_edge = np.nan_to_num(contrast_edge)
     
     return contrast_edge, edge_output, average_output
@@ -587,7 +598,13 @@ def manual_Technique(image,low_threshold,high_threshold,value=255):
 
 #histogram peak technique 
 def histogram_peak_threshold_segmentation(image):
-    hist=cv2.calcHist([image],[0],None,[256],[ 0,255]).flatten()
+    # hist=cv2.calcHist([image],[0],None,[256],[ 0,255]).flatten()
+    hist = np.zeros(256, dtype=int)
+    
+    # Loop over all pixels in the image and count their intensity values
+    for pixel_value in image.flatten():
+        hist[pixel_value] += 1
+    
     peaks_indices=find_hitogram_peaks(hist)
     low_threshold,high_threshold=Calculate_thresholds(peaks_indices,hist)
     print([low_threshold,high_threshold])
@@ -1028,10 +1045,22 @@ def main():
             
             st.write(f"Threshold applied using the average pixel value of {avg_pixel_value:.2f}.")
             
-            if avg_pixel_value > 127:
-                st.write("The threshold might not be optimal because the average pixel value is higher than the midpoint of the 0-255 range.")
+            white_pixels = np.sum(thresholded_image == 255)
+            black_pixels = np.sum(thresholded_image == 0)
+            total_pixels = image_gray.size
+
+            white_percentage = (white_pixels / total_pixels) * 100
+            black_percentage = (black_pixels / total_pixels) * 100
+
+            optimal_threshold = False
+            if white_percentage > 20 and black_percentage > 20:
+                optimal_threshold = True
+
+            if optimal_threshold:
+                st.write("The threshold seems optimal: Both white and black regions are well-defined.")
             else:
-                st.write("The threshold might not be optimal because the average pixel value is lower than the midpoint of the 0-255 range.")
+                st.write("The threshold might not be optimal: Consider trying another method or adjusting the threshold.")
+    
         elif processing_option == "Simple Halftone":
             halftone_image = simple_halftone(image)
             st.image(image, caption='Original Image', use_column_width=True)
